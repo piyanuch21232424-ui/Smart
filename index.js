@@ -7,6 +7,8 @@ dotenv.config();
 
 // ===== ตั้งค่า =====
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// โมเดลสำรอง: ใช้เมื่อโมเดลหลักล่ม (503/429/500) ต่อเนื่อง
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
 const LINE_TOKEN = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
 const CHANNEL_SECRET = (process.env.LINE_CHANNEL_SECRET || "").trim();
 const GEMINI_KEY = (process.env.GEMINI_API_KEY || "").trim();
@@ -15,12 +17,16 @@ const SESSION_TTL_MS = 30 * 60 * 1000;  // ลืมบทสนทนาถ้�
 const RATE_LIMIT_MS = 2000;             // ผู้ใช้ส่งได้ทุก 2 วินาที
 const MAX_INPUT_CHARS = 1000;           // จำกัดความยาวข้อความผู้ใช้
 const LINE_MAX_CHARS = 4800;            // LINE จำกัด 5,000 ตัวอักษรต่อข้อความ
+const ATTEMPTS_PER_MODEL = 2;           // ลองกี่ครั้งต่อโมเดล
+const RETRY_BASE_MS = 700;              // รอ 0.7s, 1.4s, ... ระหว่างลองซ้ำ
+const RETRYABLE_STATUS = [429, 500, 503, 504];
 
 if (!GEMINI_KEY || !LINE_TOKEN || !CHANNEL_SECRET) {
   console.error("ขาดค่า env: GEMINI_API_KEY / LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET");
   process.exit(1);
 }
-console.log("ENV OK | model:", GEMINI_MODEL, "| gemini key len:", GEMINI_KEY.length,
+console.log("ENV OK | model:", GEMINI_MODEL, "| fallback:", GEMINI_FALLBACK_MODEL,
+  "| gemini key len:", GEMINI_KEY.length,
   "| line token len:", LINE_TOKEN.length, "| line secret len:", CHANNEL_SECRET.length);
 
 const app = express();
@@ -97,7 +103,61 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000).unref();
 
-// ===== เรียก Gemini =====
+// ===== เรียก Gemini (มี retry + สลับโมเดลสำรอง) =====
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function getStatus(err) {
+  if (typeof err?.status === "number") return err.status;
+  if (typeof err?.code === "number") return err.code;
+  // บางครั้ง error เป็นข้อความ JSON เช่น {"error":{"code":503,...}}
+  try {
+    const parsed = JSON.parse(err?.message || "");
+    return parsed?.error?.code;
+  } catch {
+    return undefined;
+  }
+}
+
+function buildConfig(model) {
+  const config = {
+    systemInstruction: SYSTEM_PROMPT,
+    temperature: 0.4,
+    maxOutputTokens: 1500,
+  };
+  // thinkingBudget ใช้ได้กับตระกูล 2.5 เท่านั้น โมเดลอื่นอาจ error จึงใส่เฉพาะ 2.5
+  if (model.startsWith("gemini-2.5")) {
+    config.thinkingConfig = { thinkingBudget: 0 };
+  }
+  return config;
+}
+
+async function generateWithRetry(contents) {
+  const models = [...new Set([GEMINI_MODEL, GEMINI_FALLBACK_MODEL])];
+  let lastErr;
+
+  for (const model of models) {
+    for (let attempt = 0; attempt < ATTEMPTS_PER_MODEL; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config: buildConfig(model),
+        });
+        if (model !== GEMINI_MODEL) console.log("[gemini] ใช้โมเดลสำรอง:", model);
+        return response;
+      } catch (err) {
+        lastErr = err;
+        const status = getStatus(err);
+        console.error(`Gemini Error [${model}] attempt ${attempt + 1}:`, status, err?.message || err);
+        // error ที่ลองซ้ำไม่ช่วย (เช่น 400/403/404) ให้ข้ามไปโมเดลถัดไปทันที
+        if (!RETRYABLE_STATUS.includes(status)) break;
+        if (attempt < ATTEMPTS_PER_MODEL - 1) await sleep(RETRY_BASE_MS * 2 ** attempt);
+      }
+    }
+  }
+  throw lastErr;
+}
+
 async function askGemini(userId, userMessage) {
   const session = getSession(userId);
   const contents = [
@@ -106,17 +166,7 @@ async function askGemini(userId, userMessage) {
   ];
 
   try {
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
-      contents,
-      config: {
-        systemInstruction: SYSTEM_PROMPT,
-        temperature: 0.4,
-        maxOutputTokens: 1500,
-        // ปิด thinking ของ 2.5-flash เพื่อความเร็วและไม่กิน token (ถ้าใช้โมเดลที่ไม่รองรับ ให้ลบบรรทัดนี้)
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    });
+    const response = await generateWithRetry(contents);
 
     const text = (response.text || "").trim();
     if (!text) return null;
@@ -130,7 +180,7 @@ async function askGemini(userId, userMessage) {
     session.updatedAt = Date.now();
     return text;
   } catch (error) {
-    console.error("Gemini Error:", error?.message || error);
+    console.error("Gemini failed after retries:", error?.message || error);
     return null;
   }
 }
