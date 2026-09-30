@@ -6,9 +6,9 @@ import crypto from "crypto";
 dotenv.config();
 
 // ===== ตั้งค่า =====
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 // โมเดลสำรอง: ใช้เมื่อโมเดลหลักล่ม (503/429/500) ต่อเนื่อง
-const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash";
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.7-flash";
 const LINE_TOKEN = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
 const CHANNEL_SECRET = (process.env.LINE_CHANNEL_SECRET || "").trim();
 const GEMINI_KEY = (process.env.GEMINI_API_KEY || "").trim();
