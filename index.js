@@ -33,7 +33,7 @@ const SYSTEM_PROMPT = `คุณคือผู้เชี่ยวชาญด
 async function askGemini(userMessage) {
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash-latest",
       contents: userMessage,
       config: {
         systemInstruction: SYSTEM_PROMPT,
