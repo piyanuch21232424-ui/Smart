@@ -56,14 +56,6 @@ const SYSTEM_PROMPT = `
 - จัดย่อหน้าให้อ่านง่าย ใช้ขีด (-) หรืออีโมจิเป็นหัวข้อย่อย
 - ห้ามใช้ Markdown (เช่น ** # หรือตาราง) เพราะหน้าต่างแชท LINE แสดงผลเครื่องหมายเหล่านี้ไม่ได้
 `;
-
-
-function buildConfig(model) {
-  const config = {
-    systemInstruction: SYSTEM_PROMPT,
-    temperature: 0.4,
-    maxOutputTokens: 8192,
-  };
   
   // ใส่ thinkingConfig เฉพาะเมื่อเรียกใช้โมเดลตระกูล 2.5 เท่านั้น
   if (model.startsWith("gemini-2.5")) {
