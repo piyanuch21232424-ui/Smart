@@ -63,16 +63,16 @@ function buildConfig(model) {
   const config = {
     systemInstruction: SYSTEM_PROMPT,
     temperature: 0.4,
-    // เพิ่ม maxOutputTokens จาก 1500 เป็น 8192 เพื่อให้ตอบเนื้อหาที่ยาวและละเอียดมากๆ ได้โดยไม่ถูกตัดจบ
-    maxOutputTokens: 8192, 
+    maxOutputTokens: 8192,
   };
-  // thinkingBudget ใช้ได้กับตระกูล 2.5 เท่านั้น
+  
+  // ใส่ thinkingConfig เฉพาะเมื่อเรียกใช้โมเดลตระกูล 2.5 เท่านั้น
   if (model.startsWith("gemini-2.5")) {
     config.thinkingConfig = { thinkingBudget: 0 };
   }
+  
   return config;
 }
-
 // ===== เมนูลัด: ตัวเลข/ปุ่ม -> คำถาม =====
 const MENU = {
   "1": { label: "อาการ", q: "ไข้เลือดออกมีอาการอย่างไรบ้าง" },
