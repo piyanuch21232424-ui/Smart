@@ -6,28 +6,28 @@ import crypto from "crypto";
 dotenv.config();
 
 // ===== ตั้งค่า =====
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
-// โมเดลสำรอง: ใช้เมื่อโมเดลหลักล่ม (503/429/500) ต่อเนื่อง
-const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-3.7-flash";
+// ใช้โมเดลมาตรฐานเพื่อป้องกันปัญหา Invalid Model
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-1.5-flash";
+
 const LINE_TOKEN = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
 const CHANNEL_SECRET = (process.env.LINE_CHANNEL_SECRET || "").trim();
 const GEMINI_KEY = (process.env.GEMINI_API_KEY || "").trim();
-const MAX_TURNS = 6;                    // จำนวนรอบสนทนาที่จำ (ผู้ใช้+บอท = 1 รอบ)
+
+const MAX_TURNS = 6;            // จำนวนรอบสนทนาที่จำ
 const SESSION_TTL_MS = 30 * 60 * 1000;  // ลืมบทสนทนาถ้าเงียบเกิน 30 นาที
-const RATE_LIMIT_MS = 2000;             // ผู้ใช้ส่งได้ทุก 2 วินาที
-const MAX_INPUT_CHARS = 1000;           // จำกัดความยาวข้อความผู้ใช้
-const LINE_MAX_CHARS = 4800;            // LINE จำกัด 5,000 ตัวอักษรต่อข้อความ
-const ATTEMPTS_PER_MODEL = 2;           // ลองกี่ครั้งต่อโมเดล
-const RETRY_BASE_MS = 700;              // รอ 0.7s, 1.4s, ... ระหว่างลองซ้ำ
+const RATE_LIMIT_MS = 2000;     // ผู้ใช้ส่งได้ทุก 2 วินาที
+const MAX_INPUT_CHARS = 1000;   // จำกัดความยาวข้อความผู้ใช้
+const LINE_MAX_CHARS = 4800;    // LINE จำกัด 5,000 ตัวอักษรต่อข้อความ
+const ATTEMPTS_PER_MODEL = 2;   // ลองกี่ครั้งต่อโมเดล
+const RETRY_BASE_MS = 700;      // รอ 0.7s, 1.4s ระหว่างลองซ้ำ
 const RETRYABLE_STATUS = [429, 500, 503, 504];
 
 if (!GEMINI_KEY || !LINE_TOKEN || !CHANNEL_SECRET) {
   console.error("ขาดค่า env: GEMINI_API_KEY / LINE_CHANNEL_ACCESS_TOKEN / LINE_CHANNEL_SECRET");
   process.exit(1);
 }
-console.log("ENV OK | model:", GEMINI_MODEL, "| fallback:", GEMINI_FALLBACK_MODEL,
-  "| gemini key len:", GEMINI_KEY.length,
-  "| line token len:", LINE_TOKEN.length, "| line secret len:", CHANNEL_SECRET.length);
+console.log("ENV OK | model:", GEMINI_MODEL, "| fallback:", GEMINI_FALLBACK_MODEL);
 
 const app = express();
 app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
@@ -56,15 +56,8 @@ const SYSTEM_PROMPT = `
 - จัดย่อหน้าให้อ่านง่าย ใช้ขีด (-) หรืออีโมจิเป็นหัวข้อย่อย
 - ห้ามใช้ Markdown (เช่น ** # หรือตาราง) เพราะหน้าต่างแชท LINE แสดงผลเครื่องหมายเหล่านี้ไม่ได้
 `;
-  
-  // ใส่ thinkingConfig เฉพาะเมื่อเรียกใช้โมเดลตระกูล 2.5 เท่านั้น
-  if (model.startsWith("gemini-2.5")) {
-    config.thinkingConfig = { thinkingBudget: 0 };
-  }
-  
-  return config;
-}
-// ===== เมนูลัด: ตัวเลข/ปุ่ม -> คำถาม =====
+
+// ===== เมนูลัด =====
 const MENU = {
   "1": { label: "อาการ", q: "ไข้เลือดออกมีอาการอย่างไรบ้าง" },
   "2": { label: "วิธีป้องกัน", q: "วิธีป้องกันยุงลายและไข้เลือดออกทำอย่างไรบ้าง (3 เก็บ + 5 ป.)" },
@@ -79,7 +72,6 @@ const quickReplyItems = Object.entries(MENU).map(([num, m]) => ({
   action: { type: "message", label: `${num}. ${m.label}`.slice(0, 20), text: num },
 }));
 
-// ===== คำเตือนอาการอันตราย (ตรวจก่อนเรียก AI เพื่อความเร็วและแน่นอน) =====
 const DANGER_REGEX =
   /(ปวดท้องมาก|อาเจียนไม่หยุด|อาเจียนตลอด|อาเจียนเป็นเลือด|ถ่ายดำ|ถ่ายเป็นเลือด|เลือดออก|เลือดกำเดา|เลือดออกตามไรฟัน|มือเท้าเย็น|ตัวเย็น|ซึม|ไม่รู้สึกตัว|หมดสติ|หายใจลำบาก|ช็อก|ปัสสาวะน้อย|กระสับกระส่าย)/;
 
@@ -88,9 +80,8 @@ const DANGER_NOTICE =
 
 const DISCLAIMER = "\n\nℹ️ ข้อมูลนี้เพื่อความรู้ทั่วไป ไม่ใช่การวินิจฉัย หากกังวลควรพบแพทย์หรือโทร 1422";
 
-// ===== ความจำบทสนทนา (ในหน่วยความจำ) =====
-// หมายเหตุ: ข้อมูลหายเมื่อรีสตาร์ท server ถ้าต้องการถาวรให้ย้ายไป Redis/DB
-const sessions = new Map(); // userId -> { history: [{role, parts}], updatedAt, lastMsgAt }
+// ===== ความจำบทสนทนา =====
+const sessions = new Map();
 
 function getSession(userId) {
   const now = Date.now();
@@ -102,7 +93,6 @@ function getSession(userId) {
   return s;
 }
 
-// ล้าง session หมดอายุเป็นระยะ ป้องกันหน่วยความจำโต
 setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) {
@@ -110,13 +100,11 @@ setInterval(() => {
   }
 }, 10 * 60 * 1000).unref();
 
-// ===== เรียก Gemini (มี retry + สลับโมเดลสำรอง) =====
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function getStatus(err) {
   if (typeof err?.status === "number") return err.status;
   if (typeof err?.code === "number") return err.code;
-  // บางครั้ง error เป็นข้อความ JSON เช่น {"error":{"code":503,...}}
   try {
     const parsed = JSON.parse(err?.message || "");
     return parsed?.error?.code;
@@ -125,13 +113,14 @@ function getStatus(err) {
   }
 }
 
+// รวมฟังก์ชัน buildConfig ไว้เพียงที่เดียวและขยาย maxOutputTokens เป็น 8192
 function buildConfig(model) {
   const config = {
     systemInstruction: SYSTEM_PROMPT,
     temperature: 0.4,
-    maxOutputTokens: 1500,
+    maxOutputTokens: 8192,
   };
-  // thinkingBudget ใช้ได้กับตระกูล 2.5 เท่านั้น โมเดลอื่นอาจ error จึงใส่เฉพาะ 2.5
+  
   if (model.startsWith("gemini-2.5")) {
     config.thinkingConfig = { thinkingBudget: 0 };
   }
@@ -156,7 +145,6 @@ async function generateWithRetry(contents) {
         lastErr = err;
         const status = getStatus(err);
         console.error(`Gemini Error [${model}] attempt ${attempt + 1}:`, status, err?.message || err);
-        // error ที่ลองซ้ำไม่ช่วย (เช่น 400/403/404) ให้ข้ามไปโมเดลถัดไปทันที
         if (!RETRYABLE_STATUS.includes(status)) break;
         if (attempt < ATTEMPTS_PER_MODEL - 1) await sleep(RETRY_BASE_MS * 2 ** attempt);
       }
@@ -174,11 +162,9 @@ async function askGemini(userId, userMessage) {
 
   try {
     const response = await generateWithRetry(contents);
-
     const text = (response.text || "").trim();
     if (!text) return null;
 
-    // เก็บประวัติเมื่อสำเร็จเท่านั้น
     session.history.push({ role: "user", parts: [{ text: userMessage }] });
     session.history.push({ role: "model", parts: [{ text }] });
     if (session.history.length > MAX_TURNS * 2) {
@@ -192,16 +178,14 @@ async function askGemini(userId, userMessage) {
   }
 }
 
-// ===== ตัดข้อความยาวให้พอดีกับ LINE =====
 function splitText(text, size = LINE_MAX_CHARS) {
   const chunks = [];
   for (let i = 0; i < text.length; i += size) chunks.push(text.slice(i, i + size));
   return chunks;
 }
 
-// ===== ตอบกลับ LINE =====
 async function replyLine(replyToken, text, { withMenu = true } = {}) {
-  const chunks = splitText(text).slice(0, 5); // LINE ส่งได้สูงสุด 5 ข้อความต่อ reply
+  const chunks = splitText(text).slice(0, 5);
   const messages = chunks.map((t) => ({ type: "text", text: t }));
   if (withMenu) {
     messages[messages.length - 1].quickReply = { items: quickReplyItems };
@@ -223,7 +207,6 @@ async function replyLine(replyToken, text, { withMenu = true } = {}) {
   }
 }
 
-// ===== แสดงสถานะกำลังพิมพ์ (ใช้ได้เฉพาะแชท 1:1) =====
 async function showLoading(userId) {
   try {
     await fetch("https://api.line.me/v2/bot/chat/loading/start", {
@@ -239,7 +222,6 @@ async function showLoading(userId) {
   }
 }
 
-// ===== Flex Message ต้อนรับ =====
 function welcomeMessage() {
   return {
     type: "flex",
@@ -299,7 +281,6 @@ async function replyWelcome(replyToken) {
   }
 }
 
-// ===== ตรวจลายเซ็น LINE =====
 function verifySignature(rawBody, signature) {
   if (!rawBody || !signature) return false;
   const hash = crypto.createHmac("SHA256", CHANNEL_SECRET).update(rawBody).digest();
@@ -307,9 +288,7 @@ function verifySignature(rawBody, signature) {
   return hash.length === sig.length && crypto.timingSafeEqual(hash, sig);
 }
 
-// ===== จัดการแต่ละ event =====
 async function handleEvent(event) {
-  // เพิ่มเพื่อน
   if (event.type === "follow") {
     await replyWelcome(event.replyToken);
     return;
@@ -317,7 +296,6 @@ async function handleEvent(event) {
 
   if (event.type !== "message") return;
 
-  // ข้อความที่ไม่ใช่ตัวอักษร (สติกเกอร์ รูป ฯลฯ)
   if (event.message.type !== "text") {
     await replyLine(event.replyToken, "ขออภัยครับ ตอนนี้ผมอ่านได้เฉพาะข้อความตัวอักษร ลองพิมพ์คำถามหรือเลือกเมนูได้เลย");
     return;
@@ -327,25 +305,21 @@ async function handleEvent(event) {
   const raw = event.message.text.trim();
   const session = getSession(userId);
 
-  // จำกัดความถี่
   const now = Date.now();
   if (now - session.lastMsgAt < RATE_LIMIT_MS) return;
   session.lastMsgAt = now;
 
-  // ทักทาย/เมนู
   if (/^(สวัสดี|หวัดดี|hi|hello|เมนู|menu|เริ่ม)/i.test(raw)) {
     await replyWelcome(event.replyToken);
     return;
   }
 
-  // ล้างความจำ
   if (/^(ล้างประวัติ|เริ่มใหม่|reset)$/i.test(raw)) {
     sessions.delete(userId);
     await replyLine(event.replyToken, "ล้างประวัติการสนทนาแล้วครับ เริ่มถามใหม่ได้เลย");
     return;
   }
 
-  // ตัวเลขเมนู
   let question = MENU[raw]?.q || raw;
 
   if (question.length > MAX_INPUT_CHARS) {
@@ -353,7 +327,7 @@ async function handleEvent(event) {
     return;
   }
 
-  if (event.source?.type === "user") showLoading(userId); // ไม่ต้อง await
+  if (event.source?.type === "user") showLoading(userId);
 
   const answer = await askGemini(userId, question);
 
@@ -365,11 +339,9 @@ async function handleEvent(event) {
     return;
   }
 
-  // ถ้าพบคำบ่งชี้อาการอันตราย ให้แปะคำเตือนไว้หัวข้อความเสมอ
   let finalText = answer;
   if (DANGER_REGEX.test(raw)) finalText = DANGER_NOTICE + finalText;
 
-  // ใส่ disclaimer เฉพาะเมื่อพูดถึงอาการ/การไปหาหมอ/ยา เพื่อไม่ให้ยาวเกินจำเป็น
   if (/(อาการ|หมอ|โรงพยาบาล|ยา|ไข้|วัคซีน)/.test(raw + question)) {
     finalText += DISCLAIMER;
   }
@@ -377,7 +349,6 @@ async function handleEvent(event) {
   await replyLine(event.replyToken, finalText);
 }
 
-// ===== Webhook =====
 app.post("/webhook", (req, res) => {
   const signature = req.headers["x-line-signature"];
   console.log("[webhook] hit | has signature:", !!signature, "| events:", req.body?.events?.length ?? 0);
@@ -387,13 +358,10 @@ app.post("/webhook", (req, res) => {
     return res.status(401).send("Invalid signature");
   }
 
-  // ตอบ 200 ทันที เพื่อไม่ให้ LINE ส่ง webhook ซ้ำ
   res.status(200).send("OK");
 
   const events = req.body.events || [];
   for (const event of events) {
-    console.log("[event]", event.type, event.message?.type || "", "| redelivery:", !!event.deliveryContext?.isRedelivery);
-    // ข้าม event ที่ LINE ส่งซ้ำ (redelivery)
     if (event.deliveryContext?.isRedelivery) continue;
     handleEvent(event).catch((e) => console.error("handleEvent error:", e));
   }
