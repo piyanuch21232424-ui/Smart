@@ -8,7 +8,7 @@ dotenv.config();
 // ===== ตั้งค่า =====
 // ใช้โมเดลมาตรฐานเพื่อป้องกันปัญหา Invalid Model
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
-const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-1.5-flash";
+const GEMINI_FALLBACK_MODEL = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.0-flash";
 
 const LINE_TOKEN = (process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
 const CHANNEL_SECRET = (process.env.LINE_CHANNEL_SECRET || "").trim();
