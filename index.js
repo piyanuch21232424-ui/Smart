@@ -57,7 +57,6 @@ const SYSTEM_PROMPT = `
 - ห้ามใช้ Markdown (เช่น ** # หรือตาราง) เพราะหน้าต่างแชท LINE แสดงผลเครื่องหมายเหล่านี้ไม่ได้
 `;
 
-// ... (โค้ดส่วนอื่นคงเดิม จนถึงฟังก์ชัน buildConfig) ...
 
 function buildConfig(model) {
   const config = {
